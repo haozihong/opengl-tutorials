@@ -58,12 +58,9 @@ int main( void )
 
 	// Ensure we can capture the escape key being pressed below
 	glfwSetInputMode(window, GLFW_STICKY_KEYS, GL_TRUE);
-    // Hide the mouse and enable unlimited mouvement
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     
     // Set the mouse at the center of the screen
     glfwPollEvents();
-    glfwSetCursorPos(window, 1024/2, 768/2);
 
 	// Dark blue background
 	glClearColor(0.0f, 0.0f, 0.4f, 0.0f);
@@ -93,6 +90,46 @@ int main( void )
 	
 	// Get a handle for our "myTextureSampler" uniform
 	GLuint TextureID  = glGetUniformLocation(programID, "myTextureSampler");
+
+	// A flag to tell the fragment shader to render models in green
+	GLuint OnlyGreenID  = glGetUniformLocation(programID, "OnlyGreen");
+
+	// A flag to indicate whether show specular and diffuse components
+	bool specularDiffuseOn = true;
+	GLuint SpecularDiffuseOnID  = glGetUniformLocation(programID, "SpecularDiffuseOn");
+
+	// L key's state of last frame
+	int lastL = GLFW_RELEASE;
+
+	// Prepare a rectangle on the z=0 plane
+	static const float rect_width = 6.25;
+	static const GLfloat rect_vertex_buffer_data[] = { 
+		-1.0f * rect_width / 2, -1.0f * rect_width / 2, 0.0f,
+		 1.0f * rect_width / 2, -1.0f * rect_width / 2, 0.0f,
+		 1.0f * rect_width / 2,  1.0f * rect_width / 2, 0.0f,
+		 1.0f * rect_width / 2,  1.0f * rect_width / 2, 0.0f,
+		-1.0f * rect_width / 2,  1.0f * rect_width / 2, 0.0f,
+		-1.0f * rect_width / 2, -1.0f * rect_width / 2, 0.0f,
+	};
+
+	static const GLfloat rect_normal_buffer_data[] = { 
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+	};
+
+	GLuint rectvertexbuffer;
+	glGenBuffers(1, &rectvertexbuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, rectvertexbuffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(rect_vertex_buffer_data), rect_vertex_buffer_data, GL_STATIC_DRAW);
+
+	GLuint rectnormalbuffer;
+	glGenBuffers(1, &rectnormalbuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, rectnormalbuffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(rect_normal_buffer_data), rect_normal_buffer_data, GL_STATIC_DRAW);
 
 	// Read our .obj file
 	std::vector<unsigned short> indices;
@@ -124,6 +161,15 @@ int main( void )
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, elementbuffer);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned short), &indices[0] , GL_STATIC_DRAW);
 
+	// The model matrices for 4 Suzanne models
+	glm::mat4 ModelMatrices[4];
+	for (int i = 0; i < 4; i++) {
+		ModelMatrices[i] = glm::mat4();
+		ModelMatrices[i] = glm::rotate(ModelMatrices[i], pi<float>() / 2, glm::vec3(1, 0, 0));
+		ModelMatrices[i] = glm::rotate(ModelMatrices[i], pi<float>() / 2 * i, glm::vec3(0, 1, 0));
+		ModelMatrices[i] = glm::translate(ModelMatrices[i], glm::vec3(0.0f, 1.0f, 1.87f));
+	}
+
 	// Get a handle for our "LightPosition" uniform
 	glUseProgram(programID);
 	GLuint LightID = glGetUniformLocation(programID, "LightPosition_worldspace");
@@ -150,10 +196,46 @@ int main( void )
 		// Use our shader
 		glUseProgram(programID);
 
-		// Compute the MVP matrix from keyboard and mouse input
+		// Compute the P and V matrix from keyboard and mouse input
 		computeMatricesFromInputs();
 		glm::mat4 ProjectionMatrix = getProjectionMatrix();
 		glm::mat4 ViewMatrix = getViewMatrix();
+
+		int curL = glfwGetKey(window, GLFW_KEY_L);
+		if (lastL == GLFW_PRESS && curL == GLFW_RELEASE){
+			specularDiffuseOn ^= 1;
+		}
+		lastL = curL;
+		glUniform1i(SpecularDiffuseOnID, specularDiffuseOn);
+
+		glm::vec3 lightPos = glm::vec3(4,4,4);
+		glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
+
+		// Let the fragment shader draw everything in green
+		glUniform1i(OnlyGreenID, 1);
+
+		glEnableVertexAttribArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, rectvertexbuffer);
+		glVertexAttribPointer(
+			0,                  // attribute 0.
+			3,                  // size
+			GL_FLOAT,           // type
+			GL_FALSE,           // normalized?
+			0,                  // stride
+			(void*)0            // array buffer offset
+		);
+
+		glEnableVertexAttribArray(2);
+		glBindBuffer(GL_ARRAY_BUFFER, rectnormalbuffer);
+		glVertexAttribPointer(
+			2,                  // attribute 2.
+			3,                  // size
+			GL_FLOAT,           // type
+			GL_FALSE,           // normalized?
+			0,                  // stride
+			(void*)0            // array buffer offset
+		);
+
 		glm::mat4 ModelMatrix = glm::mat4(1.0);
 		glm::mat4 MVP = ProjectionMatrix * ViewMatrix * ModelMatrix;
 
@@ -163,14 +245,18 @@ int main( void )
 		glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrix[0][0]);
 		glUniformMatrix4fv(ViewMatrixID, 1, GL_FALSE, &ViewMatrix[0][0]);
 
-		glm::vec3 lightPos = glm::vec3(4,4,4);
-		glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
-
 		// Bind our texture in Texture Unit 0
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, Texture);
 		// Set our "myTextureSampler" sampler to use Texture Unit 0
 		glUniform1i(TextureID, 0);
+
+		// Draw the rectangle !
+		glDrawArrays(GL_TRIANGLES, 0, 2*3); // 6 indices starting at 0 -> 2 triangles
+
+		glDisableVertexAttribArray(0);
+		glDisableVertexAttribArray(2);
+		glUniform1i(OnlyGreenID, 0);
 
 		// 1rst attribute buffer : vertices
 		glEnableVertexAttribArray(0);
@@ -211,13 +297,23 @@ int main( void )
 		// Index buffer
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, elementbuffer);
 
-		// Draw the triangles !
-		glDrawElements(
-			GL_TRIANGLES,      // mode
-			indices.size(),    // count
-			GL_UNSIGNED_SHORT,   // type
-			(void*)0           // element array buffer offset
-		);
+		for (int i = 0; i < 4; i++) {
+			glm::mat4 MVP = ProjectionMatrix * ViewMatrix * ModelMatrices[i];
+
+			// Send our transformation to the currently bound shader, 
+			// in the "MVP" uniform
+			glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &MVP[0][0]);
+			glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrices[i][0][0]);
+			glUniformMatrix4fv(ViewMatrixID, 1, GL_FALSE, &ViewMatrix[0][0]);
+
+			// Draw the triangles !
+			glDrawElements(
+				GL_TRIANGLES,      // mode
+				indices.size(),    // count
+				GL_UNSIGNED_SHORT,   // type
+				(void*)0           // element array buffer offset
+			);
+		}
 
 		glDisableVertexAttribArray(0);
 		glDisableVertexAttribArray(1);
