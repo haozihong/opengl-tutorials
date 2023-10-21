@@ -86,6 +86,7 @@ int main( void )
 
 	// Load the texture
 	GLuint Texture = loadDDS("uvmap.DDS");
+	GLuint RectTexture = loadBMP_custom("uvtexture1.bmp");
 	
 	// Get a handle for our "myTextureSampler" uniform
 	GLuint TextureID  = glGetUniformLocation(programID, "myTextureSampler");
@@ -111,6 +112,15 @@ int main( void )
 		-1.0f * rect_width / 2, -1.0f * rect_width / 2, 0.0f,
 	};
 
+	static const GLfloat rect_uv_buffer_data[] = { 
+		0.0f, 0.0f,
+		1.0f, 0.0f,
+		1.0f, 1.0f,
+		1.0f, 1.0f,
+		0.0f, 1.0f,
+		0.0f, 0.0f,
+	};
+
 	static const GLfloat rect_normal_buffer_data[] = { 
 		0.0f, 0.0f, 1.0f,
 		0.0f, 0.0f, 1.0f,
@@ -124,6 +134,11 @@ int main( void )
 	glGenBuffers(1, &rectvertexbuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, rectvertexbuffer);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(rect_vertex_buffer_data), rect_vertex_buffer_data, GL_STATIC_DRAW);
+
+	GLuint rectuvbuffer;
+	glGenBuffers(1, &rectuvbuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, rectuvbuffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(rect_uv_buffer_data), rect_uv_buffer_data, GL_STATIC_DRAW);
 
 	GLuint rectnormalbuffer;
 	glGenBuffers(1, &rectnormalbuffer);
@@ -216,13 +231,25 @@ int main( void )
 		glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
 
 		// Let the fragment shader draw everything in green
-		glUniform1i(OnlyGreenID, 1);
+		// Comment it since we have texture now
+		//glUniform1i(OnlyGreenID, 1);
 
 		glEnableVertexAttribArray(vertexPosition_modelspaceID);
 		glBindBuffer(GL_ARRAY_BUFFER, rectvertexbuffer);
 		glVertexAttribPointer(
 			vertexPosition_modelspaceID,  // The attribute we want to configure
 			3,                            // size
+			GL_FLOAT,                     // type
+			GL_FALSE,                     // normalized?
+			0,                            // stride
+			(void*)0                      // array buffer offset
+		);
+
+		glEnableVertexAttribArray(vertexUVID);
+		glBindBuffer(GL_ARRAY_BUFFER, rectuvbuffer);
+		glVertexAttribPointer(
+			vertexUVID,                   // The attribute we want to configure
+			2,                            // size : U+V => 2
 			GL_FLOAT,                     // type
 			GL_FALSE,                     // normalized?
 			0,                            // stride
@@ -251,16 +278,21 @@ int main( void )
 
 		// Bind our texture in Texture Unit 0
 		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, Texture);
+		glBindTexture(GL_TEXTURE_2D, RectTexture);
 		// Set our "myTextureSampler" sampler to user Texture Unit 0
 		glUniform1i(TextureID, 0);
+
+		// Make this rectangle double-sided
+		glDisable(GL_CULL_FACE);
 
 		// Draw the rectangle !
 		glDrawArrays(GL_TRIANGLES, 0, 2*3); // 6 indices starting at 0 -> 2 triangles
 
 		glDisableVertexAttribArray(vertexPosition_modelspaceID);
+		glDisableVertexAttribArray(vertexUVID);
 		glDisableVertexAttribArray(vertexNormal_modelspaceID);
 		glUniform1i(OnlyGreenID, 0);
+		glEnable(GL_CULL_FACE);
 
 		// 1rst attribute buffer : vertices
 		glEnableVertexAttribArray(vertexPosition_modelspaceID);
@@ -300,6 +332,9 @@ int main( void )
 
 		// Index buffer
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, elementbuffer);
+
+		// Switch to Suzanne's texture
+		glBindTexture(GL_TEXTURE_2D, Texture);
 
 		for (int i = 0; i < 4; i++) {
 			glm::mat4 MVP = ProjectionMatrix * ViewMatrix * ModelMatrices[i];
