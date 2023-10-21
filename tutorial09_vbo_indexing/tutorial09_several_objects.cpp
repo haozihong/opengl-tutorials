@@ -44,7 +44,7 @@ int main( void )
 		return -1;
 	}
 	glfwMakeContextCurrent(window);
-    
+
 	// Initialize GLEW
 	if (glewInit() != GLEW_OK) {
 		fprintf(stderr, "Failed to initialize GLEW\n");
@@ -55,12 +55,9 @@ int main( void )
 
 	// Ensure we can capture the escape key being pressed below
 	glfwSetInputMode(window, GLFW_STICKY_KEYS, GL_TRUE);
-    // Hide the mouse and enable unlimited mouvement
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     
     // Set the mouse at the center of the screen
     glfwPollEvents();
-    glfwSetCursorPos(window, 1024/2, 768/2);
 
 	// Dark blue background
 	glClearColor(0.0f, 0.0f, 0.4f, 0.0f);
@@ -88,9 +85,64 @@ int main( void )
 
 	// Load the texture
 	GLuint Texture = loadDDS("uvmap.DDS");
+	GLuint RectTexture = loadBMP_custom("uvtexture1.bmp");
 	
 	// Get a handle for our "myTextureSampler" uniform
 	GLuint TextureID  = glGetUniformLocation(programID, "myTextureSampler");
+
+	// A flag to tell the fragment shader to render models in green
+	GLuint OnlyGreenID  = glGetUniformLocation(programID, "OnlyGreen");
+
+	// A flag to indicate whether show specular and diffuse components
+	bool specularDiffuseOn = true;
+	GLuint SpecularDiffuseOnID  = glGetUniformLocation(programID, "SpecularDiffuseOn");
+
+	// L key's state of last frame
+	int lastL = GLFW_RELEASE;
+
+	// Prepare a rectangle on the z=0 plane
+	static const float rect_width = 6.25;
+	static const GLfloat rect_vertex_buffer_data[] = { 
+		-1.0f * rect_width / 2, -1.0f * rect_width / 2, 0.0f,
+		 1.0f * rect_width / 2, -1.0f * rect_width / 2, 0.0f,
+		 1.0f * rect_width / 2,  1.0f * rect_width / 2, 0.0f,
+		 1.0f * rect_width / 2,  1.0f * rect_width / 2, 0.0f,
+		-1.0f * rect_width / 2,  1.0f * rect_width / 2, 0.0f,
+		-1.0f * rect_width / 2, -1.0f * rect_width / 2, 0.0f,
+	};
+
+	static const GLfloat rect_uv_buffer_data[] = { 
+		0.0f, 0.0f,
+		1.0f, 0.0f,
+		1.0f, 1.0f,
+		1.0f, 1.0f,
+		0.0f, 1.0f,
+		0.0f, 0.0f,
+	};
+
+	static const GLfloat rect_normal_buffer_data[] = { 
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+	};
+
+	GLuint rectvertexbuffer;
+	glGenBuffers(1, &rectvertexbuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, rectvertexbuffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(rect_vertex_buffer_data), rect_vertex_buffer_data, GL_STATIC_DRAW);
+
+	GLuint rectuvbuffer;
+	glGenBuffers(1, &rectuvbuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, rectuvbuffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(rect_uv_buffer_data), rect_uv_buffer_data, GL_STATIC_DRAW);
+
+	GLuint rectnormalbuffer;
+	glGenBuffers(1, &rectnormalbuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, rectnormalbuffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(rect_normal_buffer_data), rect_normal_buffer_data, GL_STATIC_DRAW);
 
 	// Read our .obj file
 	std::vector<glm::vec3> vertices;
@@ -127,6 +179,15 @@ int main( void )
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, elementbuffer);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned short), &indices[0] , GL_STATIC_DRAW);
 
+	// The model matrices for 4 Suzanne objects
+	glm::mat4 ModelMatrices[4];
+	for (int i = 0; i < 4; i++) {
+		ModelMatrices[i] = glm::mat4();
+		ModelMatrices[i] = glm::rotate(ModelMatrices[i], pi<float>() / 2, glm::vec3(1, 0, 0));
+		ModelMatrices[i] = glm::rotate(ModelMatrices[i], pi<float>() / 2 * i, glm::vec3(0, 1, 0));
+		ModelMatrices[i] = glm::translate(ModelMatrices[i], glm::vec3(0.0f, 1.0f, 1.87f));
+	}
+
 	// Get a handle for our "LightPosition" uniform
 	glUseProgram(programID);
 	GLuint LightID = glGetUniformLocation(programID, "LightPosition_worldspace");
@@ -151,39 +212,49 @@ int main( void )
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 
-		// Compute the MVP matrix from keyboard and mouse input
+		// Compute the P and V matrix from keyboard and mouse input
 		computeMatricesFromInputs();
 		glm::mat4 ProjectionMatrix = getProjectionMatrix();
 		glm::mat4 ViewMatrix = getViewMatrix();
-		
-		
-		////// Start of the rendering of the first object //////
-		
+
+		int curL = glfwGetKey(window, GLFW_KEY_L);
+		if (lastL == GLFW_PRESS && curL == GLFW_RELEASE){
+			specularDiffuseOn ^= 1;
+		}
+		lastL = curL;
+		glUniform1i(SpecularDiffuseOnID, specularDiffuseOn);
+
+		////// Start of the rendering of the rectangle //////
+
 		// Use our shader
 		glUseProgram(programID);
-	
+
 		glm::vec3 lightPos = glm::vec3(4,4,4);
 		glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
 		glUniformMatrix4fv(ViewMatrixID, 1, GL_FALSE, &ViewMatrix[0][0]); // This one doesn't change between objects, so this can be done once for all objects that use "programID"
-		
-		glm::mat4 ModelMatrix1 = glm::mat4(1.0);
-		glm::mat4 MVP1 = ProjectionMatrix * ViewMatrix * ModelMatrix1;
+
+		glm::mat4 ModelMatrixRect = glm::mat4(1.0);
+		glm::mat4 MVP1 = ProjectionMatrix * ViewMatrix * ModelMatrixRect;
 
 		// Send our transformation to the currently bound shader, 
 		// in the "MVP" uniform
 		glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &MVP1[0][0]);
-		glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrix1[0][0]);
+		glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrixRect[0][0]);
 
 
 		// Bind our texture in Texture Unit 0
 		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, Texture);
+		glBindTexture(GL_TEXTURE_2D, RectTexture);
 		// Set our "myTextureSampler" sampler to user Texture Unit 0
 		glUniform1i(TextureID, 0);
 
+		// Let the fragment shader draw everything in green
+		// Comment it since we have texture now
+		//glUniform1i(OnlyGreenID, 1);
+
 		// 1rst attribute buffer : vertices
 		glEnableVertexAttribArray(vertexPosition_modelspaceID);
-		glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
+		glBindBuffer(GL_ARRAY_BUFFER, rectvertexbuffer);
 		glVertexAttribPointer(
 			vertexPosition_modelspaceID, // The attribute we want to configure
 			3,                  // size
@@ -195,7 +266,7 @@ int main( void )
 
 		// 2nd attribute buffer : UVs
 		glEnableVertexAttribArray(vertexUVID);
-		glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
+		glBindBuffer(GL_ARRAY_BUFFER, rectuvbuffer);
 		glVertexAttribPointer(
 			vertexUVID,                       // The attribute we want to configure
 			2,                                // size : U+V => 2
@@ -207,7 +278,7 @@ int main( void )
 
 		// 3rd attribute buffer : normals
 		glEnableVertexAttribArray(vertexNormal_modelspaceID);
-		glBindBuffer(GL_ARRAY_BUFFER, normalbuffer);
+		glBindBuffer(GL_ARRAY_BUFFER, rectnormalbuffer);
 		glVertexAttribPointer(
 			vertexNormal_modelspaceID,        // The attribute we want to configure
 			3,                                // size
@@ -217,22 +288,17 @@ int main( void )
 			(void*)0                          // array buffer offset
 		);
 
-		// Index buffer
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, elementbuffer);
+		// Make this rectangle double-sided
+		glDisable(GL_CULL_FACE);
 
-		// Draw the triangles !
-		glDrawElements(
-			GL_TRIANGLES,      // mode
-			indices.size(),    // count
-			GL_UNSIGNED_SHORT,   // type
-			(void*)0           // element array buffer offset
-		);
+		// Draw the rectangle !
+		glDrawArrays(GL_TRIANGLES, 0, 2*3); // 6 indices starting at 0 -> 2 triangles
 
+		glUniform1i(OnlyGreenID, 0);
+		glEnable(GL_CULL_FACE);
 
-
-
-		////// End of rendering of the first object //////
-		////// Start of the rendering of the second object //////
+		////// End of rendering of the rectangle //////
+		////// Start of the rendering of the 4 Suzanne objects //////
 
 		// In our very specific case, the 2 objects use the same shader.
 		// So it's useless to re-bind the "programID" shader, since it's already the current one.
@@ -253,19 +319,8 @@ int main( void )
 		//glUniform1i(TextureID, 0);
 		
 		
-		// BUT the Model matrix is different (and the MVP too)
-		glm::mat4 ModelMatrix2 = glm::mat4(1.0);
-		ModelMatrix2 = glm::translate(ModelMatrix2, glm::vec3(2.0f, 0.0f, 0.0f));
-		glm::mat4 MVP2 = ProjectionMatrix * ViewMatrix * ModelMatrix2;
-
-		// Send our transformation to the currently bound shader, 
-		// in the "MVP" uniform
-		glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &MVP2[0][0]);
-		glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrix2[0][0]);
-
-
 		// The rest is exactly the same as the first object
-		
+
 		// 1rst attribute buffer : vertices
 		//glEnableVertexAttribArray(vertexPosition_modelspaceID); // Already enabled
 		glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
@@ -284,14 +339,23 @@ int main( void )
 		// Index buffer
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, elementbuffer);
 
-		// Draw the triangles !
-		glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_SHORT, (void*)0);
+		// Switch to Suzanne's texture
+		glBindTexture(GL_TEXTURE_2D, Texture);
 
+		for (int i = 0; i < 4; i++) {
+			// BUT the Model matrix is different (and the MVP too)
+			glm::mat4 MVP2 = ProjectionMatrix * ViewMatrix * ModelMatrices[i];
 
-		////// End of rendering of the second object //////
+			// Send our transformation to the currently bound shader, 
+			// in the "MVP" uniform
+			glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &MVP2[0][0]);
+			glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrices[i][0][0]);
 
+			// Draw the triangles !
+			glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_SHORT, (void*)0);
+		}
 
-
+		////// End of rendering of the 4 Suzanne objects //////
 
 		glDisableVertexAttribArray(vertexPosition_modelspaceID);
 		glDisableVertexAttribArray(vertexUVID);
