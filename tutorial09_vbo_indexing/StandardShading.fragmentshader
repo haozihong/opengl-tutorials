@@ -11,6 +11,8 @@ varying vec3 LightDirection_cameraspace;
 uniform sampler2D myTextureSampler;
 uniform mat4 MV;
 uniform vec3 LightPosition_worldspace;
+uniform int OnlyGreen;
+uniform int SpecularDiffuseOn;
 
 void main(){
 
@@ -20,7 +22,12 @@ void main(){
 	float LightPower = 50.0f;
 	
 	// Material properties
-	vec3 MaterialDiffuseColor = texture2D( myTextureSampler, UV ).rgb;
+	vec3 MaterialDiffuseColor;
+	if (OnlyGreen == 1) {
+		 MaterialDiffuseColor = vec3(0.0, 1.0, 0.0);
+	} else {
+		 MaterialDiffuseColor = texture2D( myTextureSampler, UV ).rgb;
+	}
 	vec3 MaterialAmbientColor = vec3(0.1,0.1,0.1) * MaterialDiffuseColor;
 	vec3 MaterialSpecularColor = vec3(0.3,0.3,0.3);
 
@@ -52,8 +59,8 @@ void main(){
 		// Ambient : simulates indirect lighting
 		MaterialAmbientColor +
 		// Diffuse : "color" of the object
-		MaterialDiffuseColor * LightColor * LightPower * cosTheta / (distance*distance) +
+		SpecularDiffuseOn * MaterialDiffuseColor * LightColor * LightPower * cosTheta / (distance*distance) +
 		// Specular : reflective highlight, like a mirror
-		MaterialSpecularColor * LightColor * LightPower * pow(cosAlpha,5) / (distance*distance);
+		SpecularDiffuseOn * MaterialSpecularColor * LightColor * LightPower * pow(cosAlpha,5) / (distance*distance);
 
 }
