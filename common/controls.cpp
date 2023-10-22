@@ -7,6 +7,8 @@ extern GLFWwindow* window; // The "extern" keyword here is to access the variabl
 #include <glm/gtc/matrix_transform.hpp>
 using namespace glm;
 
+#include <cmath>
+
 #include "controls.hpp"
 
 glm::mat4 ViewMatrix;
@@ -21,13 +23,14 @@ glm::mat4 getProjectionMatrix(){
 
 
 const float PI = pi<float>();
+const float EPSILON = 1e-6;
 
 // Initial radius : 10
 float radius = 10;
-// Initial horizontal angle : toward origin
-float horizontalAngle = -PI / 2;
-// Initial vertical angle : toward origin
-float verticalAngle = PI * 0.3;
+// Initial camera horizontal angle : on +X axis (+Z is up. Always look at the origin)
+float horizontalAngle = 0;
+// Initial camera vertical angle : on xy plane (+Z is up. Always look at the origin)
+float verticalAngle = PI * 0.5;
 // Initial Field of View
 float initialFoV = 45.0f;
 
@@ -53,6 +56,9 @@ void computeMatricesFromInputs(){
 	if (glfwGetKey( window, GLFW_KEY_S ) == GLFW_PRESS){
 		radius += deltaTime * distSpeed;
 	}
+	// Restrict the radius >= 0
+	radius = max(radius, EPSILON);
+
 	// Rotates the camera to the left
 	if (glfwGetKey( window, GLFW_KEY_A) == GLFW_PRESS){
 		horizontalAngle -= deltaTime * angleSpeed;
@@ -61,6 +67,9 @@ void computeMatricesFromInputs(){
 	if (glfwGetKey( window, GLFW_KEY_D ) == GLFW_PRESS){
 		horizontalAngle += deltaTime * angleSpeed;
 	}
+	// Make the horizontalAngle loop within [0, PI * 2]
+	horizontalAngle = fmod(horizontalAngle + PI * 2, PI * 2);
+
 	// radially rotates the camera up
 	if (glfwGetKey( window, GLFW_KEY_UP ) == GLFW_PRESS){
 		verticalAngle -= deltaTime * angleSpeed;
@@ -69,7 +78,8 @@ void computeMatricesFromInputs(){
 	if (glfwGetKey( window, GLFW_KEY_DOWN ) == GLFW_PRESS){
 		verticalAngle += deltaTime * angleSpeed;
 	}
-	verticalAngle = glm::clamp(verticalAngle, 0.0001f, PI - 0.0001f);
+	// Restrict the verticalAngle within [0, PI]
+	verticalAngle = glm::clamp(verticalAngle, EPSILON, PI - EPSILON);
 	
 	glm::vec3 position = glm::vec3(
 		radius * sin(verticalAngle) * cos(horizontalAngle),
@@ -85,7 +95,7 @@ void computeMatricesFromInputs(){
 	ViewMatrix       = glm::lookAt(
 								position,           // Camera is here
 								glm::vec3(), // and looks here : at the same position, plus "direction"
-								glm::vec3(0, 0, 1)  // Head is up (set to 0,-1,0 to look upside-down)
+								glm::vec3(0, 0, 1)  // Head is up (set to 0,0,1 to look upside-down)
 						   );
 
 	// For the next frame, the "last time" will be "now"
